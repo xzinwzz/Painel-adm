@@ -1,0 +1,479 @@
+
+local Players = game:GetService("Players")
+local TextChatService = game:GetService("TextChatService")
+local StarterGui = game:GetService("StarterGui")
+local CoreGui = game:GetService("CoreGui")
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local TweenService = game:GetService("TweenService")
+
+local LocalPlayer = Players.LocalPlayer
+
+-- ðŸš¨ ConfiguraÃ§Ã£o de Donos e Moderadores
+local DONOS = {
+    ["rtrt967"] = true,
+    ["Lolyta6662"] = true,
+  
+}
+local MODS = {
+    ["Fld_333"] = true,
+    
+
+
+}
+local TEMP_MODS = {}
+
+local function IsDono(n) return DONOS[n] == true end
+local function IsMod(n) return MODS[n] == true end
+local function IsTempMod(n) return TEMP_MODS[n] == true end
+local function IsAutorizado(n) return IsDono(n) or IsMod(n) or IsTempMod(n) end
+
+-- ðŸš¨ ATENÃ‡ÃƒO: VERIFIQUE SE O CAMINHO PARA OS REMOTES ESTÃ CORRETO!
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+
+-- ðŸ§  VariÃ¡veis de Estado
+local COQUETTE_USERS = {}
+local tagsVisiveis = true
+local JAILED_PLAYERS = {}
+local FROZEN_PLAYERS = {}
+
+-- ConfiguraÃ§Ã£o de Jumpscares
+local JUMPSCARES = {
+    { Name = ";jumps1", ImageId = "rbxassetid://126754882337711", AudioId = "rbxassetid://138873214826309" },
+    { Name = ";jumps2", ImageId = "rbxassetid://86379969987314", AudioId = "rbxassetid://143942090" },
+    { Name = ";jumps3", ImageId = "rbxassetid://127382022168206", AudioId = "rbxassetid://143942090" },
+    { Name = ";jumps4", ImageId = "rbxassetid://95973611964555", AudioId = "rbxassetid://138873214826309" },
+}
+
+-- FunÃ§Ãµes de AÃ§Ã£o (Freeze, Unfreeze, Jail, Unjail, Float, KillPlus, Jumpscare)
+local function FreezePlayer(player)
+    if not player or not player.Character then return false end
+    local h = player.Character:FindFirstChildOfClass("Humanoid")
+    if not h or FROZEN_PLAYERS[player.Name] then return false end
+    FROZEN_PLAYERS[player.Name] = { WalkSpeed = h.WalkSpeed, JumpPower = h.JumpPower }
+    h.WalkSpeed = 0
+    h.JumpPower = 0
+    return true
+end
+
+local function UnfreezePlayer(player)
+    if not player or not FROZEN_PLAYERS[player.Name] then return false end
+    local s = FROZEN_PLAYERS[player.Name]
+    if player.Character then
+        local h = player.Character:FindFirstChildOfClass("Humanoid")
+        if h then
+            h.WalkSpeed = s.WalkSpeed
+            h.JumpPower = s.JumpPower
+        end
+    end
+    FROZEN_PLAYERS[player.Name] = nil
+    return true
+end
+
+local function CreateAndManageJail(player)
+    if not player or not player.Character then return false end
+    local e = Workspace:FindFirstChild("Jail_" .. player.Name)
+    if e then e:Destroy() end
+    if JAILED_PLAYERS[player.Name] and JAILED_PLAYERS[player.Name].loop then
+        task.cancel(JAILED_PLAYERS[player.Name].loop)
+    end
+    local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+    local m = Instance.new("Model", Workspace)
+    m.Name = "Jail_" .. player.Name
+    local s = 8
+    local p = hrp.Position
+    local t = {
+        Base = Instance.new("Part", m),
+        Roof = Instance.new("Part", m),
+        Wall1 = Instance.new("Part", m),
+        Wall2 = Instance.new("Part", m),
+        Wall3 = Instance.new("Part", m),
+        Wall4 = Instance.new("Part", m)
+    }
+    t.Base.Size = Vector3.new(s, 0.5, s)
+    t.Base.Position = p - Vector3.new(0, player.Character.Humanoid.HipHeight + 0.25, 0)
+    t.Roof.Size = Vector3.new(s, 0.5, s)
+    t.Roof.Position = t.Base.Position + Vector3.new(0, s, 0)
+    t.Wall1.Size = Vector3.new(0.5, s, s)
+    t.Wall1.Position = t.Base.Position + Vector3.new(s / 2, s / 2, 0)
+    t.Wall2.Size = Vector3.new(0.5, s, s)
+    t.Wall2.Position = t.Base.Position - Vector3.new(s / 2, -s / 2, 0)
+    t.Wall3.Size = Vector3.new(s, s, 0.5)
+    t.Wall3.Position = t.Base.Position + Vector3.new(0, s / 2, s / 2)
+    t.Wall4.Size = Vector3.new(s, s, 0.5)
+    t.Wall4.Position = t.Base.Position - Vector3.new(0, -s / 2, s / 2)
+    for _, v in pairs(t) do
+        v.Anchored = true
+        v.CanCollide = true
+        v.Material = Enum.Material.Neon
+        v.Color = Color3.fromRGB(0, 200, 255)
+        v.Transparency = 0.6
+    end
+    if player == LocalPlayer then
+        local l = task.spawn(function()
+            local c = t.Base.Position + Vector3.new(0, player.Character.Humanoid.HipHeight, 0)
+            while JAILED_PLAYERS[player.Name] and player.Parent and player.Character and player.Character.Parent do
+                local h = player.Character:FindFirstChild("HumanoidRootPart")
+                if h and (h.Position - c).Magnitude > (s / 2) - 1 then
+                    h.CFrame = CFrame.new(c)
+                end
+                task.wait(0.1)
+            end
+        end)
+        JAILED_PLAYERS[player.Name] = { loop = l }
+    else
+        JAILED_PLAYERS[player.Name] = {}
+    end
+    return true
+end
+
+local function RemoveJail(player)
+    local w = Workspace:FindFirstChild("Jail_" .. player.Name)
+    if w then w:Destroy() end
+    if not player or not JAILED_PLAYERS[player.Name] then return false end
+    local d = JAILED_PLAYERS[player.Name]
+    if d.loop then task.cancel(d.loop) end
+    JAILED_PLAYERS[player.Name] = nil
+    return true
+end
+
+local function FloatPlayer(player)
+    if not player or not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") or not player.Character:FindFirstChildOfClass("Humanoid") then return false end
+    local targetHrp = player.Character.HumanoidRootPart
+    local targetHumanoid = player.Character:FindFirstChildOfClass("Humanoid")
+    local targetPos = targetHrp.Position
+
+    targetHumanoid.WalkSpeed = 0
+    targetHumanoid.JumpHeight = 0
+
+    local bodyVelocity = Instance.new("BodyVelocity", targetHrp)
+    bodyVelocity.MaxForce = Vector3.new(0, math.huge, 0)
+    bodyVelocity.Velocity = Vector3.new(0, 10, 0)
+    bodyVelocity.Name = "FloatVelocity"
+
+    local maxHeight = targetPos.Y + 50
+    local connection
+    connection = game:GetService("RunService").Heartbeat:Connect(function()
+        if not player.Character or not player.Character.Parent or not targetHrp.Parent or not targetHumanoid.Parent then
+            bodyVelocity:Destroy()
+            connection:Disconnect()
+            return
+        end
+        if targetHrp.Position.Y >= maxHeight then
+            bodyVelocity:Destroy()
+            connection:Disconnect()
+            targetHumanoid.Health = 0
+        end
+    end)
+    return true
+end
+
+local function KillPlus(player)
+    if not player or not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then return false end
+    local targetHrp = player.Character.HumanoidRootPart
+    local targetPos = targetHrp.Position
+
+    local parts = {}
+    local numParts = 5
+    for i = 1, numParts do
+        local part = Instance.new("Part", Workspace)
+        part.Name = "KillPlusPart_" .. player.Name .. "_" .. i
+        part.Size = Vector3.new(2, 2, 2)
+        part.Position = targetPos + Vector3.new(math.random(-10, 10), -5, math.random(-10, 10))
+        part.Anchored = true
+        part.CanCollide = true
+        part.Material = Enum.Material.Neon
+        part.Color = Color3.fromRGB(255, 0, 0)
+        table.insert(parts, part)
+    end
+
+    local speed = 50
+    for _, part in ipairs(parts) do
+        local distance = (targetPos - part.Position).Magnitude
+        local duration = distance / speed
+        local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
+        local tween = TweenService:Create(part, tweenInfo, { Position = targetPos + Vector3.new(0, 1, 0) })
+        part.Anchored = false
+        tween:Play()
+
+        part.Touched:Connect(function(hit)
+            if hit.Parent == player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                local bodyVelocity = Instance.new("BodyVelocity", targetHrp)
+                bodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+                bodyVelocity.Velocity = Vector3.new(math.random(-50, 50), 100, math.random(-50, 50))
+                game:GetService("Debris"):AddItem(bodyVelocity, 0.5)
+            end
+        end)
+    end
+
+    game:GetService("Debris"):AddItem(Instance.new("Folder", Workspace), 5):GetChildren()[1]:Add(parts)
+    return true
+end
+
+local function TriggerJumpscare(player, jumpscare)
+    if not player or player ~= LocalPlayer then return false end
+    local screenGui = Instance.new("ScreenGui", CoreGui)
+    screenGui.Name = "JumpscareGui"
+    screenGui.IgnoreGuiInset = true
+    local imageLabel = Instance.new("ImageLabel", screenGui)
+    imageLabel.Size = UDim2.new(1, 0, 1, 0)
+    imageLabel.Position = UDim2.new(0, 0, 0, 0)
+    imageLabel.BackgroundTransparency = 1
+    imageLabel.Image = jumpscare.ImageId
+    local sound = Instance.new("Sound", screenGui)
+    sound.SoundId = jumpscare.AudioId
+    sound.Volume = 1
+    sound.Looped = false
+    sound:Play()
+    local flashCount = 10
+    local flashInterval = 0.2
+    for i = 1, flashCount do
+        if not screenGui.Parent then break end
+        imageLabel.ImageTransparency = (i % 2 == 0) and 0.3 or 0
+        task.wait(flashInterval)
+    end
+    sound:Stop()
+    screenGui:Destroy()
+    return true
+end
+
+
+Players.PlayerRemoving:Connect(function(player)
+    RemoveJail(player)
+    UnfreezePlayer(player)
+    COQUETTE_USERS[player.Name] = nil
+    TEMP_MODS[player.Name] = nil
+    if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+        local bodyVelocity = player.Character.HumanoidRootPart:FindFirstChild("FloatVelocity")
+        if bodyVelocity then bodyVelocity:Destroy() end
+    end
+    for i = 1, 5 do
+        local part = Workspace:FindFirstChild("KillPlusPart_" .. player.Name .. "_" .. i)
+        if part then part:Destroy() end
+    end
+end)
+
+
+-- ConfiguraÃ§Ã£o da UI Compacta
+local function CreateAdminUI()
+    if CoreGui:FindFirstChild("CoqAdminUI") then return end
+    local screen = Instance.new("ScreenGui", CoreGui)
+    screen.Name = "CoqAdminUI"
+    screen.ResetOnSpawn = false
+    local panel = Instance.new("Frame", screen)
+    panel.Size = UDim2.new(0, 320, 0, 450)
+    panel.Position = UDim2.new(0.5, -160, 0.5, -225)
+    panel.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    panel.Active = true
+    panel.Draggable = true
+    Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 8)
+    local fullSz = panel.Size
+    local header = Instance.new("Frame", panel)
+    header.Size = UDim2.new(1, 0, 0, 36)
+    header.BackgroundTransparency = 1
+    local title = Instance.new("TextLabel", header)
+    title.Text = "Coquette Hub"
+    title.Size = UDim2.new(1, -70, 1, 0)
+    title.Position = UDim2.new(0, 10, 0, 0)
+    title.BackgroundTransparency = 1
+    title.TextColor3 = Color3.new(1, 1, 1)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 18
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    local btnClose = Instance.new("TextButton", header)
+    btnClose.Text = "âœ–"
+    btnClose.Font = Enum.Font.GothamBold
+    btnClose.TextSize = 14
+    btnClose.TextColor3 = Color3.new(1, 1, 1)
+    btnClose.BackgroundTransparency = 1
+    btnClose.Size = UDim2.new(0, 25, 0, 25)
+    btnClose.Position = UDim2.new(1, -30, 0, 5)
+    btnClose.MouseButton1Click:Connect(function() screen:Destroy() end)
+    local btnMin = Instance.new("TextButton", header)
+    btnMin.Text = "_"
+    btnMin.Font = Enum.Font.GothamBold
+    btnMin.TextSize = 14
+    btnMin.TextColor3 = Color3.new(1, 1, 1)
+    btnMin.BackgroundTransparency = 1
+    btnMin.Size = UDim2.new(0, 25, 0, 25)
+    btnMin.Position = UDim2.new(1, -60, 0, 5)
+    local tabContainer = Instance.new("Frame", panel)
+    tabContainer.Size = UDim2.new(1, 0, 0, 30)
+    tabContainer.Position = UDim2.new(0, 0, 0, 36)
+    tabContainer.BackgroundTransparency = 1
+    local tabLayout = Instance.new("UIListLayout", tabContainer)
+    tabLayout.FillDirection = Enum.FillDirection.Horizontal
+    tabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    tabLayout.Padding = UDim.new(0, 5)
+    local body = Instance.new("Frame", panel)
+    body.Size = UDim2.new(1, 0, 1, -70)
+    body.Position = UDim2.new(0, 0, 0, 70)
+    body.BackgroundTransparency = 1
+    local minimized = false
+    btnMin.MouseButton1Click:Connect(function()
+        minimized = not minimized
+        body.Visible = not minimized
+        tabContainer.Visible = not minimized
+        if minimized then
+            panel.Size = UDim2.new(0, 180, 0, 36)
+            btnMin.Text = "â"
+        else
+            panel.Size = fullSz
+            btnMin.Text = "_"
+        end
+    end)
+    local cmdFrame = Instance.new("ScrollingFrame", body)
+    cmdFrame.Size = UDim2.new(1, 0, 1, 0)
+    cmdFrame.BackgroundTransparency = 1
+    cmdFrame.BorderSizePixel = 0
+    cmdFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 105, 180)
+    cmdFrame.ScrollBarThickness = 6
+    local cmdListLayout = Instance.new("UIListLayout", cmdFrame)
+    cmdListLayout.Padding = UDim.new(0, 8)
+    cmdListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    cmdListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    local avatarFrame = Instance.new("ScrollingFrame", body)
+    avatarFrame.Size = UDim2.new(1, 0, 1, 0)
+    avatarFrame.BackgroundTransparency = 1
+    avatarFrame.BorderSizePixel = 0
+    avatarFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 105, 180)
+    avatarFrame.ScrollBarThickness = 6
+    avatarFrame.Visible = false
+    local avatarListLayout = Instance.new("UIListLayout", avatarFrame)
+    avatarListLayout.Padding = UDim.new(0, 8)
+    avatarListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    avatarListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    local terrorFrame = Instance.new("ScrollingFrame", body)
+    terrorFrame.Size = UDim2.new(1, 0, 1, 0)
+    terrorFrame.BackgroundTransparency = 1
+    terrorFrame.BorderSizePixel = 0
+    terrorFrame.ScrollBarImageColor3 = Color3.fromRGB(150, 105, 180)
+    terrorFrame.ScrollBarThickness = 6
+    terrorFrame.Visible = false
+    local terrorListLayout = Instance.new("UIListLayout", terrorFrame)
+    terrorListLayout.Padding = UDim.new(0, 8)
+    terrorListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    terrorListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    local btnTabCmds = Instance.new("TextButton", tabContainer)
+    btnTabCmds.Name = "CmdsTab"
+    btnTabCmds.Text = "Comandos"
+    btnTabCmds.Font = Enum.Font.GothamBold
+    btnTabCmds.TextSize = 14
+    btnTabCmds.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    btnTabCmds.TextColor3 = Color3.new(1, 1, 1)
+    btnTabCmds.Size = UDim2.new(0.33, -5, 1, 0)
+    local btnTabAvatar = Instance.new("TextButton", tabContainer)
+    btnTabAvatar.Name = "AvatarTab"
+    btnTabAvatar.Text = "Avatar"
+    btnTabAvatar.Font = Enum.Font.Gotham
+    btnTabAvatar.TextSize = 14
+    btnTabAvatar.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    btnTabAvatar.TextColor3 = Color3.new(0.8, 0.8, 0.8)
+    btnTabAvatar.Size = UDim2.new(0.33, -5, 1, 0)
+    local btnTabTerror = Instance.new("TextButton", tabContainer)
+    btnTabTerror.Name = "TerrorTab"
+    btnTabTerror.Text = "Terror"
+    btnTabTerror.Font = Enum.Font.Gotham
+    btnTabTerror.TextSize = 14
+    btnTabTerror.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    btnTabTerror.TextColor3 = Color3.new(0.8, 0.8, 0.8)
+    btnTabTerror.Size = UDim2.new(0.33, -5, 1, 0)
+    local function switchTab(tab)
+        if tab == "cmds" then
+            cmdFrame.Visible = true
+            avatarFrame.Visible = false
+            terrorFrame.Visible = false
+            btnTabCmds.Font = Enum.Font.GothamBold
+            btnTabCmds.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+            btnTabAvatar.Font = Enum.Font.Gotham
+            btnTabAvatar.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+            btnTabTerror.Font = Enum.Font.Gotham
+            btnTabTerror.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        elseif tab == "avatar" then
+            avatarFrame.Visible = true
+            cmdFrame.Visible = false
+            terrorFrame.Visible = false
+            btnTabAvatar.Font = Enum.Font.GothamBold
+            btnTabAvatar.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+            btnTabCmds.Font = Enum.Font.Gotham
+            btnTabCmds.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+            btnTabTerror.Font = Enum.Font.Gotham
+            btnTabTerror.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        else
+            terrorFrame.Visible = true
+            cmdFrame.Visible = false
+            avatarFrame.Visible = false
+            btnTabTerror.Font = Enum.Font.GothamBold
+            btnTabTerror.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+            btnTabCmds.Font = Enum.Font.Gotham
+            btnTabCmds.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+            btnTabAvatar.Font = Enum.Font.Gotham
+            btnTabAvatar.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        end
+    end
+    btnTabCmds.MouseButton1Click:Connect(function() switchTab("cmds") end)
+    btnTabAvatar.MouseButton1Click:Connect(function() switchTab("avatar") end)
+    btnTabTerror.MouseButton1Click:Connect(function() switchTab("terror") end)
+    local selectedCmdTarget = nil
+    local ddCmd = Instance.new("TextButton", cmdFrame)
+    ddCmd.Name = "Dropdown"
+    ddCmd.Text = "ðŸŽ¯ Selecionar jogador"
+    ddCmd.Font = Enum.Font.Gotham
+    ddCmd.TextSize = 14
+    ddCmd.TextColor3 = Color3.new(1, 1, 1)
+    ddCmd.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    ddCmd.Size = UDim2.new(1, -20, 0, 30)
+    ddCmd.LayoutOrder = 1
+    local openCmd = false
+    local frameDDCmd = nil
+    ddCmd.MouseButton1Click:Connect(function()
+        if openCmd and frameDDCmd then
+            frameDDCmd:Destroy()
+            openCmd = false
+            return
+        end
+        frameDDCmd = Instance.new("ScrollingFrame", cmdFrame)
+        frameDDCmd.Position = UDim2.new(0.5, -((cmdFrame.AbsoluteSize.X - 20) / 2), 0, 40)
+        frameDDCmd.Size = UDim2.new(1, -20, 0, 120)
+        frameDDCmd.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+        frameDDCmd.BorderSizePixel = 0
+        frameDDCmd.ClipsDescendants = true
+        frameDDCmd.LayoutOrder = 2
+        local lst = Instance.new("UIListLayout", frameDDCmd)
+        lst.Padding = UDim.new(0, 2)
+        local playersInServer = {}
+        for _, p in ipairs(Players:GetPlayers()) do
+            table.insert(playersInServer, p.Name)
+        end
+        table.sort(playersInServer)
+        for _, name in ipairs(playersInServer) do
+            local b = Instance.new("TextButton", frameDDCmd)
+            b.Text = name
+            b.Font = Enum.Font.Gotham
+            b.TextSize = 14
+            b.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+            b.TextColor3 = Color3.new(1, 1, 1)
+            b.Size = UDim2.new(1, 0, 0, 25)
+            b.MouseButton1Click:Connect(function()
+                selectedCmdTarget = name
+                ddCmd.Text = "ðŸŽ¯ " .. name
+                frameDDCmd:Destroy()
+                openCmd = false
+            end)
+        end
+        openCmd = true
+    end)
+    local cmdContainer = Instance.new("Frame", cmdFrame)
+    cmdContainer.BackgroundTransparency = 1
+    cmdContainer.Size = UDim2.new(1, -20, 0, 0)
+    cmdContainer.AutomaticSize = Enum.AutomaticSize.Y
+    cmdContainer.LayoutOrder = 3
+    local uiListLayout = Instance.new("UIListLayout", cmdContainer)
+    uiListLayout.Padding = UDim.new(0, 6)
+    local cmds = { ";verifique", ";kick", ";crash", ";kill", ";killplus", ";bring", ";jail", ";unjail", ";freeze", ";unfreeze", ";adm", ";unadm", ";tag", ";untag", ";tag all", ";untag all", ";float" }
+    local needsTarget = { ";kick", ";crash", ";kill", ";killplus", ";bring", ";jail", ";unjail", ";freeze", ";unfreeze", ";adm", ";unadm", ";float" }
+    for _, lbl in ipairs(cmds) do
+        local
